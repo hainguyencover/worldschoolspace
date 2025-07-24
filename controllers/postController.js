@@ -19,35 +19,47 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 const getAllPosts = async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const offset = (page - 1) * limit;
+  const { category_id, q } = req.query; // Lấy category_id và query (q) từ query parameters
+
+  let sql = `
+    SELECT 
+      p.*, 
+      u.name AS author_name, 
+      c.name AS category_name
+    FROM 
+      posts p
+    LEFT JOIN 
+      users u ON p.author_id = u.id
+    LEFT JOIN 
+      categories c ON p.category_id = c.id
+  `;
+  const params = [];
+  const conditions = [];
+
+  if (category_id && category_id !== "all") {
+    conditions.push("p.category_id = ?");
+    params.push(category_id);
+  }
+
+  if (q) {
+    conditions.push("(p.title LIKE ? OR p.content LIKE ?)");
+    params.push(`%${q}%`, `%${q}%`);
+  }
+
+  if (conditions.length > 0) {
+    sql += " WHERE " + conditions.join(" AND ");
+  }
+
+  sql += " ORDER BY p.createdAt DESC"; // Sắp xếp theo ngày tạo mới nhất
 
   try {
-    const [posts] = await pool.query(
-      `SELECT p.*, c.name AS category_name, u.name AS author_name
-            FROM posts p
-            LEFT JOIN categories c ON p.category_id = c.id
-            LEFT JOIN users u ON p.author_id = u.id
-            ORDER BY p.createdAt DESC
-            LIMIT ? OFFSET ?`,
-      [limit, offset]
-    );
-    const [totalRows] = await pool.query("SELECT COUNT(*) AS total FROM posts");
-    const totalPosts = totalRows[0].total;
-
+    const [posts] = await pool.query(sql, params);
     res.status(200).json({
       message: "Lấy danh sách bài viết thành công.",
       data: posts,
-      pagination: {
-        total: totalPosts,
-        page,
-        limit,
-        totalPages: Math.ceil(totalPosts / limit),
-      },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Lỗi khi lấy bài viết:", error);
     res
       .status(500)
       .json({ message: "Lỗi máy chủ khi lấy bài viết.", error: error.message });
